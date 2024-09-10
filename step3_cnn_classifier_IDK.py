@@ -10,6 +10,11 @@ from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 from torch.utils.data import Subset
 
+# Notes to self:
+# - There is a significant class imbalance among various forms of hemmorhages. Class weights should be 
+#   employed to compensate for this mismatch and to allow the neural network to train more aggressively 
+#   on infrequently observed hemorrhages.
+
 class SupervisedClassifier(nn.Module):
     def __init__(self):
         super(SupervisedClassifier, self).__init__()

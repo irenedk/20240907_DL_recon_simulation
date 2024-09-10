@@ -25,23 +25,25 @@ class RSNA_Intracranial_Hemorrhage_Dataset(Dataset):
         assert float(dicom_data.RescaleSlope) == 1.0, 'RescaleSlope is not 1.0'
         image = dicom_data.pixel_array + float(dicom_data.RescaleIntercept)
 
+        # Note: it would be better to remove the corrupt data (should be 269 files)
+
         if self.transform:
             image = self.transform(image)
         else:
             image = torch.tensor(image).float()
             # if it has less than 512 rows, pad with -1000
-            if image.shape[0] < 512:
-                pad_left = (512 - image.shape[0]) // 2
-                pad_right = 512 - image.shape[0] - pad_left
-                assert pad_left + pad_right + image.shape[0] == 512
-                image = torch.nn.functional.pad(image, (0, 0, pad_left, pad_right), value=-1000)
-            # if it has less than 512 columns, pad with -1000
-            if image.shape[1] < 512:
-                pad_top = (512 - image.shape[1]) // 2
-                pad_bottom = 512 - image.shape[1] - pad_top
-                assert pad_top + pad_bottom + image.shape[1] == 512
-                image = torch.nn.functional.pad(image, (pad_top, pad_bottom, 0, 0), value=-1000)
-            image.unsqueeze_(0)
+            # if image.shape[0] < 512:
+            #     pad_left = (512 - image.shape[0]) // 2
+            #     pad_right = 512 - image.shape[0] - pad_left
+            #     assert pad_left + pad_right + image.shape[0] == 512
+            #     image = torch.nn.functional.pad(image, (0, 0, pad_left, pad_right), value=-1000)
+            # # if it has less than 512 columns, pad with -1000
+            # if image.shape[1] < 512:
+            #     pad_top = (512 - image.shape[1]) // 2
+            #     pad_bottom = 512 - image.shape[1] - pad_top
+            #     assert pad_top + pad_bottom + image.shape[1] == 512
+            #     image = torch.nn.functional.pad(image, (pad_top, pad_bottom, 0, 0), value=-1000)
+            # image.unsqueeze_(0)
 
         return image, labels
 
@@ -66,10 +68,48 @@ if __name__ == '__main__':
 
     # from the dataset metadata, remove everything where 'any' is 0
     dataset.metadata = dataset.metadata[dataset.metadata['any'] == 1]
+
     print(f'Dataset size after filtering "any == 0": {len(dataset)}')
 
-    indices_to_remove = []  # We'll store indices of rows to remove
+    # Note: optional to adjust the windowing to normalize pixel values
 
+    # OPTIONAL: If you would want to make it a multi-class classification, add:
+
+    # hemorrhage_types = ['epidural', 'intraparenchymal', 'intraventricular', 'subarachnoid', 'subdural']
+
+    # # Remove all images classified with multiple hemorrhage types
+    # indices_to_remove_multiple = []
+    # for idx, row in tqdm(dataset.metadata.iterrows(), total=len(dataset.metadata), desc='Checking multiple hemorrhages'):
+    #     if sum([row[hem_type] for hem_type in hemorrhage_types]) > 1:
+    #         indices_to_remove_multiple.append(idx)
+
+    # print(f"number of images to remove due to multiple hemorrhage types: {len(indices_to_remove_multiple)}")
+    # dataset.metadata.drop(indices_to_remove_multiple, inplace=True)
+    # dataset.metadata.reset_index(drop=True, inplace=True)
+    # print(f"Dataset size after removing multiple hemorrhages: {len(dataset)}")
+
+    # And adjust in step 3:
+    # - Remove Sigmoid activation
+    # - Change BCELoss() to CrossEntropyLosS()
+    # - Remove label float conversion and make integers
+    # - Use precision or recall as evaluation
+
+    # Remove all image with incorrect 512x512 dimensions
+    indices_to_remove_dimensions = []
+    for idx, row in tqdm(dataset.metadata.iterrows(), total=len(dataset.metadata), desc='Checking image dimensions'):
+        dicom_data = pydicom.dcmread(f'/data/rsna-intracranial-hemorrhage-detection/stage_2_train/ID_{row["PatientID"]}.dcm')
+        image = dicom_data.pixel_array + float(dicom_data.RescaleIntercept)
+
+        if image.shape != (512, 512):
+            indices_to_remove_dimensions.append(idx)
+    
+    print(f"Number of images to remove due to incorrect dimensions: {len(indices_to_remove_dimensions)}")
+    dataset.metadata.drop(indices_to_remove_dimensions, inplace=True)
+    dataset.metadata.reset_index(drop=True, inplace=True)
+    print(f"Dataset size after removing non 512x512 images: {len(dataset)}")
+
+    # Remove corrupt images that are not centered
+    indices_to_remove_corrupted = []  # We'll store indices of rows to remove
     for idx, row in tqdm(dataset.metadata.iterrows(), total=len(dataset.metadata), desc="Processing images"):
         # Load the DICOM image
         dicom_data = pydicom.dcmread(f'/data/rsna-intracranial-hemorrhage-detection/stage_2_train/ID_{row["PatientID"]}.dcm')
@@ -89,13 +129,12 @@ if __name__ == '__main__':
 
         # If variance is too high, mark this index for removal
         if variance_intensity > var_threshold:
-            indices_to_remove.append(idx)
+            indices_to_remove_corrupted.append(idx)
 
     # Remove the rows corresponding to the corrupted images
-    print(f'Number of images to remove due to corrupted centering: {len(indices_to_remove)}')
-    dataset.metadata.drop(indices_to_remove, inplace=True)
+    print(f'Number of images to remove due to corrupted centering: {len(indices_to_remove_corrupted)}')
+    dataset.metadata.drop(indices_to_remove_corrupted, inplace=True)
     dataset.metadata.reset_index(drop=True, inplace=True)
-
     print(f'Dataset size after removing corrupted images: {len(dataset)}')
 
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
