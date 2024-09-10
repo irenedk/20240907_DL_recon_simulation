@@ -62,31 +62,41 @@ if __name__ == '__main__':
                                                     '/data/rsna-intracranial-hemorrhage-detection/stage_2_train/')
     
 
-    print(len(dataset))
+    print(f'Initial dataset size: {len(dataset)}')
 
     # from the dataset metadata, remove everything where 'any' is 0
     dataset.metadata = dataset.metadata[dataset.metadata['any'] == 1]
+    print(f'Dataset size after filtering "any == 0": {len(dataset)}')
 
-    # for idx, row in dataset.metadata.iterrows():
-    #     dicom_data = pydicom.dcmread(f'/data/rsna-intracranial-hemorrhage-detection/stage_2_train/ID_{row["PatientID"]}.dcm')
-    #     image = dicom_data.pixel_array + float(dicom_data.RescaleIntercept)            
+    indices_to_remove = []  # We'll store indices of rows to remove
 
-    #     # Added by IDK on 9-9
-    #     top_edge = image[:2, :] # top row
-    #     bottom_edge = image[-2:, :] # bottom row
-    #     left_edge = image[:, :2] # left edge
-    #     right_edge = image[:,-2:] # right edge
+    for idx, row in tqdm(dataset.metadata.iterrows(), total=len(dataset.metadata), desc="Processing images"):
+        # Load the DICOM image
+        dicom_data = pydicom.dcmread(f'/data/rsna-intracranial-hemorrhage-detection/stage_2_train/ID_{row["PatientID"]}.dcm')
+        image = dicom_data.pixel_array + float(dicom_data.RescaleIntercept)
 
-    #     outer_edges = torch.cat([top_edge.flatten(), bottom_edge.flatten(), left_edge.flatten(), right_edge.flatten()])
-    #     variance_intensity = outer_edges.var()
-    #     var_threshold = 10
+        # Extract edges for variance calculation
+        top_edge = image[:2, :]  # top row
+        bottom_edge = image[-2:, :]  # bottom row
+        left_edge = image[:, :2]  # left edge
+        right_edge = image[:, -2:]  # right edge
 
-    #     if variance_intensity > var_threshold:
-    #         dataset.metadata.loc[idx, 'include'] = False # mark for removal
-        
-    # return dataset.metadata[dataset.metadata['include'] == True] # why is this not working?
+        # Combine outer edges and compute variance
+        outer_edges = torch.cat([top_edge.flatten(), bottom_edge.flatten(), left_edge.flatten(), right_edge.flatten()])
+        variance_intensity = outer_edges.var()
 
-    print(len(dataset))
+        var_threshold = 10  # threshold for corrupted centering
+
+        # If variance is too high, mark this index for removal
+        if variance_intensity > var_threshold:
+            indices_to_remove.append(idx)
+
+    # Remove the rows corresponding to the corrupted images
+    print(f'Number of images to remove due to corrupted centering: {len(indices_to_remove)}')
+    dataset.metadata.drop(indices_to_remove, inplace=True)
+    dataset.metadata.reset_index(drop=True, inplace=True)
+
+    print(f'Dataset size after removing corrupted images: {len(dataset)}')
 
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     dataloader_iter = iter(dataloader)
@@ -111,49 +121,46 @@ if __name__ == '__main__':
     print(f'Elapsed time: {t1-t0:.2f} seconds to load {num_batches} batches of 16 images each ({num_batches*batch_size} images total)')
 
 
-
-
-
-    # if animateFlag:
+    if animateFlag:
         
-    #     import matplotlib.pyplot as plt
-    #     import matplotlib.animation as animation
+        import matplotlib.pyplot as plt
+        import matplotlib.animation as animation
 
-    #     num_frames = 128
+        num_frames = 128
 
-    #     fig = plt.figure()
-    #     ax = fig.add_subplot(111)
-    #     im = ax.imshow(images[0,0].numpy(), cmap='gray', vmin=0, vmax=80)
-    #     ax.set_xticks([])
-    #     ax.set_yticks([])
-    #     fig.colorbar(im)
-    #     plt.tight_layout()
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        im = ax.imshow(images[0,0].numpy(), cmap='gray', vmin=0, vmax=80)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        fig.colorbar(im)
+        plt.tight_layout()
 
-    #     def update_img(n):
-    #         im.set_data(images[n,0].numpy())
-    #         # make the title the label
-    #         if labels[n,0] == 0:
-    #             title_str = 'No Hemorrhage'
-    #         else:
-    #             title_str = ''
-    #         if labels[n,1] == 1:
-    #             title_str += ' Epidural Hemorrhage'
-    #         if labels[n,2] == 1:
-    #             title_str += ' Intraparenchymal Hemorrhage'
-    #         if labels[n,3] == 1:
-    #             title_str += ' Intraventricular Hemorrhage'
-    #         if labels[n,4] == 1:
-    #             title_str += ' Subarachnoid Hemorrhage'
-    #         if labels[n,5] == 1:
-    #             title_str += ' Subdural Hemorrhage'
-    #         ax.set_title(title_str)
-    #         return im,
+        def update_img(n):
+            im.set_data(images[n,0].numpy())
+            # make the title the label
+            if labels[n,0] == 0:
+                title_str = 'No Hemorrhage'
+            else:
+                title_str = ''
+            if labels[n,1] == 1:
+                title_str += ' Epidural Hemorrhage'
+            if labels[n,2] == 1:
+                title_str += ' Intraparenchymal Hemorrhage'
+            if labels[n,3] == 1:
+                title_str += ' Intraventricular Hemorrhage'
+            if labels[n,4] == 1:
+                title_str += ' Subarachnoid Hemorrhage'
+            if labels[n,5] == 1:
+                title_str += ' Subdural Hemorrhage'
+            ax.set_title(title_str)
+            return im,
 
-    #     ani = animation.FuncAnimation(fig, update_img, frames=num_frames, blit=True)
+        ani = animation.FuncAnimation(fig, update_img, frames=num_frames, blit=True)
 
-    #     writer = animation.writers['ffmpeg'](fps=1)
+        writer = animation.writers['ffmpeg'](fps=1)
 
-    #     ani.save('figures/dataset.mp4', writer=writer)
+        ani.save('figures/dataset.mp4', writer=writer)
 
 
 

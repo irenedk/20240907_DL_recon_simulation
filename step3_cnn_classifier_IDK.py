@@ -7,6 +7,8 @@ import numpy as np
 # from nih_chest_xray_reader import NIHChestXrayDataset
 from step2_dataset_dataloader import RSNA_Intracranial_Hemorrhage_Dataset
 from tqdm import tqdm
+from sklearn.model_selection import train_test_split
+from torch.utils.data import Subset
 
 class SupervisedClassifier(nn.Module):
     def __init__(self):
@@ -64,31 +66,31 @@ class SupervisedClassifier(nn.Module):
             nn.BatchNorm2d(512),
             nn.PReLU(),
             
-            # # Fourth block
-            # nn.Conv2d(512, 512, kernel_size=3, padding=1),
-            # nn.BatchNorm2d(512),
-            # nn.PReLU(),
-            # nn.Conv2d(512, 512, kernel_size=3, padding=1),
-            # nn.BatchNorm2d(512),
-            # nn.PReLU(),
-            # nn.Conv2d(512, 512, kernel_size=3, padding=1),
-            # nn.BatchNorm2d(512),
-            # nn.PReLU(),
-            # nn.Conv2d(512, 1024, kernel_size=3, padding=1, stride=2),  # Down convolution with stride
-            # nn.BatchNorm2d(1024),
-            # nn.PReLU()
+            # Fourth block
+            nn.Conv2d(512, 512, kernel_size=3, padding=1),
+            nn.BatchNorm2d(512),
+            nn.PReLU(),
+            nn.Conv2d(512, 512, kernel_size=3, padding=1),
+            nn.BatchNorm2d(512),
+            nn.PReLU(),
+            nn.Conv2d(512, 512, kernel_size=3, padding=1),
+            nn.BatchNorm2d(512),
+            nn.PReLU(),
+            nn.Conv2d(512, 1024, kernel_size=3, padding=1, stride=2),  # Down convolution with stride
+            nn.BatchNorm2d(1024),
+            nn.PReLU()
         )
         
         # Fully connected layers
         self.fc_layers = nn.Sequential(
-            nn.Linear(512 * 7 * 7, 512),  # Adjust based on input size and down-sampling  # Adjusted to 512
-            nn.BatchNorm1d(512),          # Adjusted to 512
+            nn.Linear(1024 * 7 * 7, 1024),  # Shouldn't this be (1024 * 32 * 32, 1024)?
+            nn.BatchNorm1d(1024),          
             nn.PReLU(),
-            nn.Linear(512, 256),          # Adjusted to 512, 256
-            nn.BatchNorm1d(256),          # Adjusted to 256
+            nn.Linear(1024, 512),          
+            nn.BatchNorm1d(512),          
             nn.PReLU(),
-            nn.Linear(512, 5),  # 5 output labels for multi-label classification
-            nn.Sigmoid()  # Output probabilities between 0 and 1
+            nn.Linear(512, 5),  
+            nn.Sigmoid() 
         )
 
     def forward(self, x):
@@ -103,11 +105,6 @@ class SupervisedClassifierObserver:
         self.model = SupervisedClassifier().to(self.device)
         self.verbose = verbose
         self.batch_size = batch_size
-        # self.labels = [
-            # 'Atelectasis', 'Cardiomegaly', 'Effusion', 'Infiltration', 'Mass',
-            # 'Nodule', 'Pneumonia', 'Pneumothorax', 'Consolidation', 'Edema',
-            # 'Emphysema', 'Fibrosis', 'Pleural_Thickening', 'Hernia'
-        # ]
         self.labels = ['epidural' , 'intraparenchymal', 'intraventricular', 'subarachnoid', 'subdural']
 
     def train(self, train_dataset, val_dataset=None, verbose=False, num_epochs=20, num_iterations_train=100, num_iterations_val=10):
@@ -235,22 +232,26 @@ if __name__ == "__main__":
     train_flag = False
     load_flag = True
 
-    # RSNA_Intracranial_Hemorrhage_Dataset
-    # split dataset into train, val, test
-
     if train_flag:
-        train_dataset = RSNA_Intracranial_Hemorrhage_Dataset(
-            root_dir='../../data',
-            csv_file='stage_2_train_reformat.csv',
-            mode='train',
-            verbose=False
+        full_dataset = RSNA_Intracranial_Hemorrhage_Dataset(
+        root_dir='../../data',
+        csv_file='stage_2_train_reformat.csv',
+        verbose=False
         )
-        val_dataset = RSNA_Intracranial_Hemorrhage_Dataset(
-            root_dir='../../data',
-            csv_file='stage_2_train_reformat.csv', # 
-            mode='val',
-            verbose=False
-        )
+
+        # Get the indices for the dataset
+        dataset_size = len(full_dataset)
+        indices = list(range(dataset_size))
+
+        # First split: train (70%), and the rest (30%) which will be split into val and eval
+        train_indices, temp_indices = train_test_split(indices, test_size=0.3, random_state=42)
+
+        # Second split: Split the temp (30%) into validation and test sets (15% each)
+        val_indices, test_indices = train_test_split(temp_indices, test_size=0.5, random_state=42)
+
+        # Create subsets
+        train_dataset = Subset(full_dataset, train_indices)
+        val_dataset = Subset(full_dataset, test_indices)
 
         observer = SupervisedClassifierObserver(verbose=True, batch_size=64)
 
@@ -267,14 +268,7 @@ if __name__ == "__main__":
     observer = SupervisedClassifierObserver(verbose=True, batch_size=64)
     observer.model.load_state_dict(torch.load('supervised_classifier_weights.pth'))
 
-    eval_dataset = RSNA_Intracranial_Hemorrhage_Dataset(
-        root_dir='../../data/NIH_Chest_Xray',
-        csv_file='stage_2_train_reformat.csv',
-        image_folder_prefix='images_',
-        max_folders=12,
-        mode='test',
-        verbose=False
-    )
+    eval_dataset = Subset(full_dataset, val_indices)
 
     results = observer.evaluate(eval_dataset, num_patients=128)
     observer.print_evaluation(results, filename="supervised_classifier_results.csv")
