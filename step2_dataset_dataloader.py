@@ -43,7 +43,7 @@ class RSNA_Intracranial_Hemorrhage_Dataset(Dataset):
             #     pad_bottom = 512 - image.shape[1] - pad_top
             #     assert pad_top + pad_bottom + image.shape[1] == 512
             #     image = torch.nn.functional.pad(image, (pad_top, pad_bottom, 0, 0), value=-1000)
-            # image.unsqueeze_(0)
+            image.unsqueeze_(0)
 
         return image, labels
 
@@ -65,34 +65,21 @@ if __name__ == '__main__':
     
 
     print(f'Initial dataset size: {len(dataset)}')
-
-    # from the dataset metadata, remove everything where 'any' is 0
-    dataset.metadata = dataset.metadata[dataset.metadata['any'] == 1]
-
-    print(f'Dataset size after filtering "any == 0": {len(dataset)}')
-
-    # Note: optional to adjust the windowing to normalize pixel values
+    dataset.metadata = dataset.metadata.rename(columns={'any': 'no_hemorrhage'})
 
     # OPTIONAL: If you would want to make it a multi-class classification, add:
+    hemorrhage_types = ['no_hemorrhage', 'epidural', 'intraparenchymal', 'intraventricular', 'subarachnoid', 'subdural']
 
-    # hemorrhage_types = ['epidural', 'intraparenchymal', 'intraventricular', 'subarachnoid', 'subdural']
+    # Remove all images classified with multiple hemorrhage types
+    indices_to_remove_multiple = []
+    for idx, row in tqdm(dataset.metadata.iterrows(), total=len(dataset.metadata), desc='Checking multiple hemorrhages'):
+        if sum([row[hem_type] for hem_type in hemorrhage_types]) > 2:
+            indices_to_remove_multiple.append(idx)
 
-    # # Remove all images classified with multiple hemorrhage types
-    # indices_to_remove_multiple = []
-    # for idx, row in tqdm(dataset.metadata.iterrows(), total=len(dataset.metadata), desc='Checking multiple hemorrhages'):
-    #     if sum([row[hem_type] for hem_type in hemorrhage_types]) > 1:
-    #         indices_to_remove_multiple.append(idx)
-
-    # print(f"number of images to remove due to multiple hemorrhage types: {len(indices_to_remove_multiple)}")
-    # dataset.metadata.drop(indices_to_remove_multiple, inplace=True)
-    # dataset.metadata.reset_index(drop=True, inplace=True)
-    # print(f"Dataset size after removing multiple hemorrhages: {len(dataset)}")
-
-    # And adjust in step 3:
-    # - Remove Sigmoid activation
-    # - Change BCELoss() to CrossEntropyLosS()
-    # - Remove label float conversion and make integers
-    # - Use precision or recall as evaluation
+    print(f"number of images to remove due to multiple hemorrhage types: {len(indices_to_remove_multiple)}")
+    dataset.metadata.drop(indices_to_remove_multiple, inplace=True)
+    dataset.metadata.reset_index(drop=True, inplace=True)
+    print(f"Dataset size after removing multiple hemorrhages: {len(dataset)}")
 
     # Remove all image with incorrect 512x512 dimensions
     indices_to_remove_dimensions = []
@@ -125,7 +112,7 @@ if __name__ == '__main__':
         outer_edges = torch.cat([top_edge.flatten(), bottom_edge.flatten(), left_edge.flatten(), right_edge.flatten()])
         variance_intensity = outer_edges.var()
 
-        var_threshold = 10  # threshold for corrupted centering
+        var_threshold = 10  # threshold for corrupted centering #NOTE not sure whether this is a good threshold or not
 
         # If variance is too high, mark this index for removal
         if variance_intensity > var_threshold:
@@ -136,6 +123,30 @@ if __name__ == '__main__':
     dataset.metadata.drop(indices_to_remove_corrupted, inplace=True)
     dataset.metadata.reset_index(drop=True, inplace=True)
     print(f'Dataset size after removing corrupted images: {len(dataset)}')
+
+    hemorrhage_counts = {hem_type: dataset.metadata[dataset.metadata[hem_type] == 1].shape[0] for hem_type in hemorrhage_types}
+
+    # Print the counts
+    print(f"Class counts before balancing: {hemorrhage_counts}")
+
+    # Find the minimum class size
+    min_class_size = min(hemorrhage_counts.values())
+    print(f'Minimum class size: {min_class_size}')
+
+    balanced_indices = []
+
+    # Function to randomly sample indices for a given class
+    def sample_indices(class_name, condition):
+        indices = dataset.metadata[condition].index.tolist()
+        return np.random.choice(indices, size=min_class_size, replace=False).tolist()
+    
+    # Sample indices for each hemorrhage type
+    for hem_type in hemorrhage_types:
+        sampled_indices = sample_indices(hem_type, dataset.metadata[hem_type] == 1)
+        balanced_indices.extend(sampled_indices)
+
+    balanced_metadata = dataset.metadata.loc[balanced_indices].reset_index(drop=True)
+    dataset.metadata = balanced_metadata
 
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     dataloader_iter = iter(dataloader)
@@ -155,6 +166,14 @@ if __name__ == '__main__':
 
     images = torch.cat(image_list, dim=0)
     labels = torch.cat(label_list, dim=0)
+
+
+    print(f'Number of images for no hemorrhage: {len(dataset.metadata[dataset.metadata["no_hemorrhage"] == 0])}')
+    print(f'Number of images for epidural hemorrhage: {len(dataset.metadata['epidural'])}')
+    print(f'Number of images for intraparenchymal hemorrhage: {len(dataset.metadata['intraparenchymal'])}')
+    print(f'Number of images for intraventricular hemorrhage: {len(dataset.metadata['intraventricular'])}')
+    print(f'Number of images for subarachnoid hemorrhage: {len(dataset.metadata['subarachnoid'])}')
+    print(f'Number of images for subdural hemorrhage: {len(dataset.metadata['subdural'])}')
 
     t1 = time.time()
     print(f'Elapsed time: {t1-t0:.2f} seconds to load {num_batches} batches of 16 images each ({num_batches*batch_size} images total)')

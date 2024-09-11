@@ -13,12 +13,17 @@ from torch.utils.data import Subset
 # Notes to self:
 # - There is a significant class imbalance among various forms of hemmorhages. Class weights should be 
 #   employed to compensate for this mismatch and to allow the neural network to train more aggressively 
-#   on infrequently observed hemorrhages.
+#   on infrequently observed hemorrhages. Another option would be construct a dataset with equal sizes
+# - Changed it to a multi-class classification to simplify the task. This requires to adjust:
+#   . Remove Sigmoid activation
+#   . Change BCELoss() to CrossEntropyLosS()
+#   . Remove label float conversion and make integers
+#   . Use precision/accuracy or recall as evaluation?
 
 class SupervisedClassifier(nn.Module):
     def __init__(self):
         super(SupervisedClassifier, self).__init__()
-        # Define a deeper CNN model for multi-label classification with more channels, BatchNorm, and PReLU
+        # Define a deeper CNN model for multi-class classification with more channels, BatchNorm, and PReLU
         
         dropout_rate = 0.5
 
@@ -88,14 +93,14 @@ class SupervisedClassifier(nn.Module):
         
         # Fully connected layers
         self.fc_layers = nn.Sequential(
-            nn.Linear(1024 * 7 * 7, 1024),  # Shouldn't this be (1024 * 32 * 32, 1024)?
+            nn.Linear(1024 * 7 * 7, 1024),  #NOTE Shouldn't this be (1024 * 32 * 32, 1024)?
             nn.BatchNorm1d(1024),          
             nn.PReLU(),
             nn.Linear(1024, 512),          
             nn.BatchNorm1d(512),          
             nn.PReLU(),
-            nn.Linear(512, 5),  
-            nn.Sigmoid() 
+            nn.Linear(512, 6),  
+            # nn.Sigmoid() 
         )
 
     def forward(self, x):
@@ -110,11 +115,11 @@ class SupervisedClassifierObserver:
         self.model = SupervisedClassifier().to(self.device)
         self.verbose = verbose
         self.batch_size = batch_size
-        self.labels = ['epidural' , 'intraparenchymal', 'intraventricular', 'subarachnoid', 'subdural']
+        self.labels = ['no_hemorrhage', 'epidural' , 'intraparenchymal', 'intraventricular', 'subarachnoid', 'subdural'] 
 
     def train(self, train_dataset, val_dataset=None, verbose=False, num_epochs=20, num_iterations_train=100, num_iterations_val=10):
         # Use Binary Cross-Entropy loss for multi-label classification
-        criterion = nn.BCELoss()
+        criterion = nn.CrossEntropyLoss()
         optimizer = optim.Adam(self.model.parameters(), lr=2e-4)
 
         # Do not use num_workers yet, was 16
@@ -135,7 +140,7 @@ class SupervisedClassifierObserver:
                     images, labels = next(train_loader_iter)
 
                 images = images.to(self.device)
-                labels = labels.to(self.device).float()
+                labels = labels.to(self.device).long()
 
                 optimizer.zero_grad()
                 outputs = self.model(images)
@@ -156,7 +161,7 @@ class SupervisedClassifierObserver:
 
     def validate(self, eval_loader, num_iterations_val=10):
         total_loss = 0.0
-        criterion = nn.BCELoss()
+        criterion = nn.CrossEntropyLoss() # Switch to cross-entropy-loss
         self.model.eval()
 
         eval_loader_iter = iter(eval_loader)
@@ -188,11 +193,17 @@ class SupervisedClassifierObserver:
             for _ in tqdm(range(num_patients // self.batch_size)):
                 images, labels = next(eval_loader_iter)
                 images = images.to(self.device)
-                labels = labels.to(self.device)
+                labels = labels.to(self.device).long()
                 all_ground_truths.append(labels)
 
                 outputs = self.model(images)  # Keep outputs on GPU for now
                 all_predictions_gpu.append(outputs)
+                _, predicted = torch.max(outputs.data, 1)  # Get the index of the max log-probability
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
+
+        accuracy = correct / total
+        print(f'Accuracy: {accuracy * 100:.2f}%')
 
         all_predictions = torch.cat(all_predictions_gpu).cpu().numpy()  # Convert predictions to numpy
         all_ground_truths = torch.cat(all_ground_truths).cpu().numpy()  # Convert ground truths to numpy
@@ -220,7 +231,7 @@ class SupervisedClassifierObserver:
             results[i, 2] = np.sum((predictions == 0) & (y_true == 1))  # FN
             results[i, 3] = np.sum((predictions == 0) & (y_true == 0))  # TN
 
-        return results
+        return accuracy, results
 
     def print_evaluation(self, results, filename=None):
         if filename:
