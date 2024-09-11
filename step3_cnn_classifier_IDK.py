@@ -93,7 +93,7 @@ class SupervisedClassifier(nn.Module):
         
         # Fully connected layers
         self.fc_layers = nn.Sequential(
-            nn.Linear(1024 * 7 * 7, 1024),  #NOTE Shouldn't this be (1024 * 32 * 32, 1024)?
+            nn.Linear(1024 * 16 * 16, 1024),  #NOTE Shouldn't this be (1024 * 32 * 32, 1024)?
             nn.BatchNorm1d(1024),          
             nn.PReLU(),
             nn.Linear(1024, 512),          

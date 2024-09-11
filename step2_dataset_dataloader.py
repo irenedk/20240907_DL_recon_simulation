@@ -25,8 +25,6 @@ class RSNA_Intracranial_Hemorrhage_Dataset(Dataset):
         assert float(dicom_data.RescaleSlope) == 1.0, 'RescaleSlope is not 1.0'
         image = dicom_data.pixel_array + float(dicom_data.RescaleIntercept)
 
-        # Note: it would be better to remove the corrupt data (should be 269 files)
-
         if self.transform:
             image = self.transform(image)
         else:
@@ -69,6 +67,7 @@ if __name__ == '__main__':
 
     # OPTIONAL: If you would want to make it a multi-class classification, add:
     hemorrhage_types = ['no_hemorrhage', 'epidural', 'intraparenchymal', 'intraventricular', 'subarachnoid', 'subdural']
+    # This is a bit confusing, as no_hemorrhage = 1 indicates a hemorrhage
 
     # Remove all images classified with multiple hemorrhage types
     indices_to_remove_multiple = []
@@ -168,7 +167,7 @@ if __name__ == '__main__':
     labels = torch.cat(label_list, dim=0)
 
 
-    print(f'Number of images for no hemorrhage: {len(dataset.metadata[dataset.metadata["no_hemorrhage"] == 0])}')
+    print(f'Number of images for no hemorrhage: {len(dataset.metadata["no_hemorrhage"] == 0)}')
     print(f'Number of images for epidural hemorrhage: {len(dataset.metadata['epidural'])}')
     print(f'Number of images for intraparenchymal hemorrhage: {len(dataset.metadata['intraparenchymal'])}')
     print(f'Number of images for intraventricular hemorrhage: {len(dataset.metadata['intraventricular'])}')
