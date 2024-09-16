@@ -48,6 +48,21 @@ class RSNA_Intracranial_Hemorrhage_Dataset(Dataset):
         if image.shape[1] != 512 or image.shape[2] != 512:
             return self.__getitem__(idx+1)
         
+        # Select first 100 patients
+        target_healthy = 500
+        target_hemorrhage = 100
+
+        selected_indices = []
+
+        no_hemorrhage_patients = self.metadata[self.metadata['no_hemorrhage'] ==1].head(target_healthy)
+        selected_indices.extend(no_hemorrhage_patients.index.tolist())
+
+        for hemorrhage_type in self.hemorrhage_types[1:]: 
+            hemorrhage_patients = self.metadata[self.metadata[hemorrhage_type] == 1].head(target_hemorrhage)
+            selected_indices.extend(hemorrhage_patients.index.tolist())
+
+        # Filter metadata
+        self.metadata = self.metadata.loc[selected_indices].reset_index(drop=True)        
 
         # now do a 2x2 mean pooling to downsample the image to 256x256
         image = torch.nn.functional.avg_pool2d(image, kernel_size=2)
